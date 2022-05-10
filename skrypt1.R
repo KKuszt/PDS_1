@@ -9,12 +9,12 @@ library(giosimport)
 ## sprawdźmy które stacje są najbliżej wybranej stacji jakości powietrza
 
 noaa_isd <- getMeta(end.year="current", lon=18.625355, lat=54.359474, returnMap=T)
-
 gdansk_met <- importNOAA(code="121420-99999", year=2010:2020)
 
 summary(gdansk_met)
 getwd()
-kat_dost <- "F:/Studia/Semestr IV/przetwarzanie_danych/Rzeszut/proj 1"
+#kat_dost <- "F:/Studia/Semestr IV/przetwarzanie_danych/Rzeszut/proj 1"
+#kat_dost <- "C:/Users/48506/Documents/Studia/Studia II rok/Semestr4/PDS/projekt_zaliczenie/PDS_1"
 setwd(kat_dost)
 
 meta <- gios_metadane(type = "stacje", 
@@ -40,7 +40,7 @@ stanowiska <- gios_metadane(type = "stanowiska",
                             mode = "wb")
 
 
-statystyki <- gios_metadane(type = "statystyki", ### nie dzila
+statystyki <- gios_metadane(typ e = "statystyki", ### nie dzila
                             download = T, 
                             path = kat_dost, 
                             mode = "wb")
@@ -86,7 +86,82 @@ dt <- inner_join(gdansk_met, so2_gd, by = "date")
 
 view(dt)
 
-#ostatecznie
-#test
+#@@@@@@@@@@@@@@@@@@@@
 
+#POMYSLY ZIEMIANA:
+#-wyczyscic dt, bo jest duzo kolumn, ktorych nie potrzebujemy, np:
+#kod, stacja, lat, lon
+#no i chyba te wszystkie z chmurami zwiazane ale nie jesyem pewny
+#i chyba substancje tez mozemy bo wiemy co to jest obs 
 
+#@@@ UŚREDNIENIE DANYCH DO MIESIĄCA @@@
+#usrednienia dokonujemy funkcją timeAverage z pakietu openair
+library(openair)
+dt_miesiac <- dt %>% openair::timeAverage(avg.time="month")
+#wartości NA zniknęły więc nic nie trzeba uzupełniać
+#w jednej kolumnie jest kilka wartośći NaN - nie wiem ocb
+
+#konwersja na obiekt tsibble
+library(tsibble)
+dt_ts <- dt_miesiac %>% 
+  mutate(date = as.Date(date)) %>% 
+  as_tsibble(index = date)
+
+#wyrzucam te kolumny ktore nas nie interesują
+#tu mozemy zmienic co faktycznie chcemy miec w ttch danych, wzialem te kolumny ktore uwazalem ze moga
+#sie przydac ale nie wiem w sumie co to ceil_hgt
+dt_ts <- dt_ts %>%
+  select(date, obs, ws, wd, air_temp, atmos_pres, visibility, dew_point, RH, ceil_hgt)
+
+library(feasts)
+#ogolnie nie da sie np. zrobic wykresu bo on chce dane CODZIENNE
+#wiec usrednienie do miesiecy tutaj pierdoli sprawe
+#fill_gaps jak odpalisz to ci pokaze, że w kazde inne dni niz 1 dzien miesiaca
+#wszystko sie wypelnia na XD
+
+#zeby zrobic wykresy musi byc obiekt tsibble, ale to nie dziala
+dt_ts %>% gg_season(obs)
+
+#zeby zrobic modele musi byc konwersja na time series
+dt_ts %>% as.ts() -> dt_ts
+
+install.packages("forecast")
+library(forecast)
+
+# Opracujemy model regresji liniowej
+fit <- tslm(obs ~ air_temp, data=dt_ts)  # to samo
+fit
+
+#nie wiem czy ten model jest dobry XD
+
+library(GGally)
+dt_ts %>%
+  as.data.frame() %>%
+  ggally_smooth_lm(aes(x=air_temp, y=obs), 
+                   se = F, 
+                   color = "blue") 
+#Warning messages:
+#1: Removed 3503 rows containing non-finite values (stat_smooth). 
+#2: Removed 3503 rows containing missing values (geom_point). 
+
+checkresiduals(fit)
+#Error in `check_aesthetics()`:
+#! Aesthetics must be either length 1 or the same as the data (1): xend, yend and x
+
+dt_ts %>%
+  as.data.frame() %>%
+  GGally::ggpairs()
+# Dwie zmienne mają ograniczone zastosowanie
+# Wykonamy model regresji wielorakiej 
+
+fit <- tslm(obs ~ air_temp + ws + atmos_pres + RH + visibility,
+            data=dt_ts)
+
+summary(fit)
+
+cor(x = dt_ts[,'obs'] %>% as.vector(), y = fitted(fit) %>% as.vector())
+summary(fit)$sigma
+summary(fit)$r.squared
+summary(fit)$adj.r.squared
+
+#wiecej nie zdazylem ide na ang
