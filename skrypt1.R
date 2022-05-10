@@ -97,21 +97,29 @@ view(dt)
 #@@@ UŚREDNIENIE DANYCH DO MIESIĄCA @@@
 #usrednienia dokonujemy funkcją timeAverage z pakietu openair
 library(openair)
-dt_miesiac <- dt %>% openair::timeAverage(avg.time="month")
-#wartości NA zniknęły więc nic nie trzeba uzupełniać
+dt_miesiac <- dt %>% openair::timeAverage(avg.time="month") #wartości NA zniknęły więc nic nie trzeba uzupełniać #domyslnie MEAN
+dt_tydz <- dt %>% openair::timeAverage(avg.time="week") #robie usrednianie tygodniowe: pozostaja wartosci NaN
+
 #w jednej kolumnie jest kilka wartośći NaN - nie wiem ocb
 
 #konwersja na obiekt tsibble
 library(tsibble)
-dt_ts <- dt_miesiac %>% 
+dt_ts_m <- dt_miesiac %>% 
+  mutate(date = as.Date(date)) %>% 
+  as_tsibble(index = date)
+
+dt_ts_t<- dt_tydz %>% 
   mutate(date = as.Date(date)) %>% 
   as_tsibble(index = date)
 
 #wyrzucam te kolumny ktore nas nie interesują
 #tu mozemy zmienic co faktycznie chcemy miec w ttch danych, wzialem te kolumny ktore uwazalem ze moga
-#sie przydac ale nie wiem w sumie co to ceil_hgt
-dt_ts <- dt_ts %>%
+#sie przydac ale nie wiem w sumie co to ceil_hgt #////// wydaje mi sie ze to pulap chmur 
+dt_ts_m <- dt_ts_m %>%
   select(date, obs, ws, wd, air_temp, atmos_pres, visibility, dew_point, RH, ceil_hgt)
+
+dt_ts_t <- dt_ts_t %>%
+  select(date, obs, ws, wd, air_temp, atmos_pres, visibility,RH, ceil_hgt) # wyrzucam dew_point bo jest korelacja z temperatura 
 
 library(feasts)
 #ogolnie nie da sie np. zrobic wykresu bo on chce dane CODZIENNE
@@ -120,22 +128,27 @@ library(feasts)
 #wszystko sie wypelnia na XD
 
 #zeby zrobic wykresy musi byc obiekt tsibble, ale to nie dziala
-dt_ts %>% gg_season(obs)
+view(as_tsibble(dt_ts_t))
+gg_season(data = as.ts(dt_ts_t), y = obs, period = "week") #nie dziala
+
+autoplot(dt_ts_m)
+autoplot(dt_ts_t)
 
 #zeby zrobic modele musi byc konwersja na time series
-dt_ts %>% as.ts() -> dt_ts
+dt_ts_m %>% as.ts() -> dt_ts_m
+dt_ts_t %>% as.ts() -> dt_ts_t
 
 install.packages("forecast")
 library(forecast)
 
 # Opracujemy model regresji liniowej
-fit <- tslm(obs ~ air_temp, data=dt_ts)  # to samo
-fit
+fit <- tslm(obs ~ air_temp, data=dt_ts_m)  # to samo
+
 
 #nie wiem czy ten model jest dobry XD
 
 library(GGally)
-dt_ts %>%
+dt_ts_m %>%
   as.data.frame() %>%
   ggally_smooth_lm(aes(x=air_temp, y=obs), 
                    se = F, 
@@ -143,25 +156,28 @@ dt_ts %>%
 #Warning messages:
 #1: Removed 3503 rows containing non-finite values (stat_smooth). 
 #2: Removed 3503 rows containing missing values (geom_point). 
+hist(summary(fit)$residuals)
 
-checkresiduals(fit)
 #Error in `check_aesthetics()`:
 #! Aesthetics must be either length 1 or the same as the data (1): xend, yend and x
 
-dt_ts %>%
+dt_ts_t %>%
   as.data.frame() %>%
   GGally::ggpairs()
 # Dwie zmienne mają ograniczone zastosowanie
 # Wykonamy model regresji wielorakiej 
 
-fit <- tslm(obs ~ air_temp + ws + atmos_pres + RH + visibility,
-            data=dt_ts)
+fit_1 <- tslm(obs ~ air_temp + ws + atmos_pres + RH + visibility,
+            data=dt_ts_t)
 
-summary(fit)
+hist(summary(fit_1)$residuals)
+quantile(summary(fit_1)$residuals)
 
-cor(x = dt_ts[,'obs'] %>% as.vector(), y = fitted(fit) %>% as.vector())
-summary(fit)$sigma
-summary(fit)$r.squared
-summary(fit)$adj.r.squared
 
-#wiecej nie zdazylem ide na ang
+summary(fit_1)$sigma
+summary(fit_1)$r.squared
+summary(fit_1)$adj.r.squared
+
+summary(dt)
+
+autoplot(dt_ts_m)
