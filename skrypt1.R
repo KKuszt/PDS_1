@@ -87,5 +87,6 @@ dt <- inner_join(gdansk_met, so2_gd, by = "date")
 view(dt)
 
 #ostatecznie
+#test
 
 
